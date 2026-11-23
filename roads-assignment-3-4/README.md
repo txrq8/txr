@@ -1,59 +1,43 @@
-# Assignments 3 and 4: road graph exploration and shortest routes
+# Assignments 3 and 4: road network graph and shortest routes
 
-`roads.cpp` is the whole solution (assignments 3 and 4 together). It needs only standard C++11.
+| File | What it is |
+| --- | --- |
+| `assignment3.cpp` | Assignment 3 on its own: builds the graph and the named-places hash table, then lets you explore the roads from a named place. |
+| `assignment4.cpp` | The whole thing: everything in assignment 3, plus shortest routes between two named places with Dijkstra's algorithm. |
+| `Assignment_3_Build_the_Graph.pdf` | Write-up for assignment 3: design, sample session, testing, and the full source code. |
+| `Assignment_4_Shortest_Routes.pdf` | Write-up for assignment 4: the same, with the shortest-route part added. |
+| `tests/` | The test tools used to verify both programs. |
+
+`assignment3.cpp` is exactly `assignment4.cpp` without the priority queue, Dijkstra's algorithm, the route printing and menu option 2.
+
+## Compiling and running
 
 ```
-g++ -std=c++11 -O2 -Wall -o roads roads.cpp
-./roads                                   # reads named-places.txt intersections.txt connections.txt
-./roads named-places.txt intersections.txt connections.txt   # or name the files yourself
+g++ -std=c++11 -O2 -Wall -o assignment4 assignment4.cpp
+./assignment4                                                 # reads named-places.txt intersections.txt connections.txt
+./assignment4 named-places.txt intersections.txt connections.txt   # or name the three files
 ```
 
-Put the three data files from the course module in the same folder, or pass their paths in that order.
+`assignment3.cpp` is built and run the same way. Both use only standard C++. They compile with no warnings as C++98, C++11, C++17 and C++20 with g++ and clang++.
 
-## What it does
+## Data files
 
-* **Assignment 3.** It builds the graph. There is one `Intersection` object per intersection, with a
-  `vector<Connection *> roads` of every segment that touches it, and one `Connection` object per road
-  segment, with pointers `a` and `b` to the intersections at its two ends. The named places go into a
-  hash table (`PlaceTable`, chaining with FNV-1a hashing, grows itself). Menu option **1** asks for a
-  place, goes to its representative intersection and lists every road segment there: the road's name
-  and type, its length, the direction it heads, and the intersection at the other end (its number,
-  position, nearest named place and how many roads meet there). Type a segment's number to move along
-  it, `p` to jump to another place, or `q` to stop.
-* **Assignment 4.** Menu option **2** asks for two places and runs Dijkstra's algorithm with a binary
-  min-heap. It prints every intersection on the route, then the name, length and direction of the
-  road taken to the next one, then a short summary and the total length of all the segments followed.
+* `named-places.txt` holds, in order: numeric code, state, name, population, area, latitude, longitude, representative intersection, and the distance to it.
+* `intersections.txt` holds, in order: longitude, latitude, distance to the nearest named place, its state, and its name. An intersection's number is its line number.
+* `connections.txt` holds, in order: road name (`?` if unnamed), road type, the two intersection numbers, and the length in miles.
 
-Places can be typed as `Miami`, `Miami, FL` or `Miami FL`. Case does not matter. If several places
-share the name, they are listed and you pick one by number or by state. If no name matches exactly,
-the program lists the places whose names start with what you typed.
+The files are written in fixed-width columns, and a value that fills its column can touch the one before it, as in
+`35.449578-100.225838`. The programs separate such values, and learn the column positions from the lines where the
+fields are clearly separated.
 
-Direction follows the assignment exactly: `atan2(lonb - lona, latb - lata)`, converted to degrees and
-put into one of the 8 compass sectors.
+At start-up the program prints two self-checks:
 
-## File layouts the program understands
+* how many road lengths agree with the positions of their ends;
+* how many named places are as close to their intersection as the file says.
 
-* `intersections.txt`: `longitude latitude distance state place-name`, one intersection per line.
-  An intersection's number is its position in the file.
-* `connections.txt`: `road-name road-type intersection-A intersection-B length-in-miles`
-* `named-places.txt`: `numeric-code state name population area latitude longitude
-  representative-intersection distance`. The name may contain spaces.
+Both should be near 100%. If either is lower, the program prints a warning that the files may not have been read correctly.
 
-The reader also copes with small variations: latitude before longitude, no road type, numbering from
-1 instead of 0, and Windows line endings. When it starts, it reports what it read and how many road
-lengths agree with the positions of their ends. That number should be close to 100%. If it is low,
-the files were not understood correctly.
+## Tests
 
-## Tests (`tests/`)
-
-* `make_test_data.py OUTDIR [options]` writes synthetic data files in the same layouts, plus a
-  `truth.json` holding the real graph.
-* `check_roads.py ./roads OUTDIR` drives the program and checks every answer independently:
-  * every route is checked against a separate Dijkstra, which is itself cross-checked with
-    Bellman-Ford;
-  * every step must be a real road segment with the right name, length and direction;
-  * the total must be correct;
-  * every intersection shown while exploring must list exactly the right road segments;
-  * choosing places by name, by state and by number is tested;
-  * the special cases are tested: unreachable places, a place with no roads, and the same place
-    twice.
+* `python3 tests/make_test_data.py DIR [options]` writes data files in the course layout, together with the true graph. Options produce variations: `--touching` for fixed columns with touching fields, `--one-based`, `--lat-first`, `--no-type`, `--type3`, `--crlf`, `--plain-numbers`, `--bom`, `--west` and `--no-south`.
+* `python3 tests/check_roads.py ./assignment4 DIR` drives the program through its menus. It checks every route, every exploration step and the place selection against an independent implementation. Add `--assignment3` when testing `assignment3`.

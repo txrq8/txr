@@ -5,7 +5,7 @@ and its own direction calculation written from the assignment text).
 
 usage: check_roads.py PROGRAM DATADIR [--routes N] [--walks N] [--steps N]
 """
-import argparse, heapq, json, math, os, random, re, subprocess, sys
+import argparse, heapq, json, math, os, random, re, select, subprocess, sys
 
 ap = argparse.ArgumentParser()
 ap.add_argument("program")
@@ -15,6 +15,7 @@ ap.add_argument("--walks", type=int, default=20)
 ap.add_argument("--steps", type=int, default=60)
 ap.add_argument("--seed", type=int, default=7)
 ap.add_argument("--bellman", type=int, default=5)
+ap.add_argument("--assignment3", action="store_true", help="the program has no shortest route option")
 args = ap.parse_args()
 rnd = random.Random(args.seed)
 T = json.load(open(os.path.join(args.datadir, "truth.json")))
@@ -87,11 +88,15 @@ def g(x):                              # how the program prints file numbers
     s = "%.10g" % x
     return s
 
+def miles(x):
+    return "%s mile%s" % (g(x), "" if x == 1 else "s")
+
 def nearest(n):
     v = nodes[n]
-    return "%s miles from %s, %s" % (g(v["dist"]), v["place"], v["state"])
+    return "%s from %s, %s" % (miles(v["dist"]), v["place"], v["state"])
 
 def title(name, typ):
+    name = "unnamed road" if name == "?" else name
     return name if typ == "" else "%s (type %s)" % (name, typ)
 
 # ------------------------------------------------------------- the program
@@ -102,6 +107,9 @@ class Program:
     def until(self, *endings):
         buf = bytearray()
         while True:
+            ready, _, _ = select.select([self.p.stdout], [], [], 30)
+            if not ready:
+                raise RuntimeError("no expected prompt after 30 s; output so far:\n" + buf.decode()[-1500:])
             c = self.p.stdout.read(1)
             if not c:
                 raise RuntimeError("program ended; output so far:\n" + buf.decode())
@@ -128,15 +136,20 @@ head = prog.until(MENU)
 m = re.search(r"Read (\d+) named places, (\d+) intersections and (\d+) road segments", head)
 if not m or (int(m.group(1)), int(m.group(2)), int(m.group(3))) != (len(places), N, len(edges)):
     fail("load summary wrong: " + head)
-if ("numbered from %d;" % base) not in head:
+if ("numbered from %d." % base) not in head:
     fail("numbering base not detected: " + head)
-print(head.strip().splitlines()[0])
-print(head.strip().splitlines()[1])
+mc = re.search(r"Checks: (\S+)% of road segment lengths agree.*\n\s+(\S+)% of named places are as close", head)
+if not mc or float(mc.group(1)) < 99.0 or float(mc.group(2)) < 99.0:
+    fail("self checks too low: " + head)
+if "Warning" in head or "could not" in head:
+    fail("warnings while loading: " + head)
+for ln in head.strip().splitlines()[:4]:
+    print(ln)
 
 # ------------------------------------------------------------ route checks
-unique = [k for k, q in enumerate(places) if q["name"].startswith("Town")]
+unique = [k for k, q in enumerate(places) if re.fullmatch(r"Town\d{3}", q["name"])]
 line_re = re.compile(r"^\s*(\d+)\. intersection #(\d+), latitude (\S+), longitude (\S+), (.*)$")
-take_re = re.compile(r"^\s+take (.*) for (\S+) miles heading (\S+)$")
+take_re = re.compile(r"^\s+take (.*) for (\S+) miles? heading (\S+)$")
 
 def check_route(a, b, text):
     pa, pb = places[a], places[b]
@@ -188,7 +201,7 @@ def check_route(a, b, text):
     if abs(float(mt.group(2)) - d) > 0.0051:
         fail("route %s -> %s: total %s but shortest is %.4f" % (pa["name"], pb["name"], mt.group(2), d))
     # the brief version must add up too
-    brief = [float(x) for x in re.findall(r"^   \S+ heading \S+ for (\S+) miles$", text, re.M)]
+    brief = [float(x) for x in re.findall(r"^   .+? heading \S+ for (\S+) miles$", text, re.M)]
     if takes and abs(sum(brief) - total) > 0.01 * len(brief) + 0.0051:
         fail("brief summary does not add up")
 
@@ -199,19 +212,19 @@ def ask_route(a, b):
     return prog.until(MENU)
 
 routes = 0
-for _ in range(args.routes):
+for _ in range(0 if args.assignment3 else args.routes):
     a, b = rnd.choice(unique), rnd.choice(unique)
     check_route(a, b, ask_route(a, b)); routes += 1
 # special cases: same place, an island, a place with no roads
 special = {q["name"]: k for k, q in enumerate(places)}
-for a, b in [(unique[0], unique[0]), (special["Island Town"], unique[1]),
+for a, b in [] if args.assignment3 else [(unique[0], unique[0]), (special["Island Town"], unique[1]),
              (unique[2], special["Island Town"]), (special["Lonely Place"], unique[3])]:
     check_route(a, b, ask_route(a, b)); routes += 1
 print("checked %d routes" % routes)
 
 # --------------------------------------------------------- explore checks
 blk_head = re.compile(r"Intersection #(\d+)\n   latitude (\S+), longitude (\S+)\n   (.*)\n")
-item_re = re.compile(r"^ +(\d+)\) (.*), (\S+) miles heading (\S+)\n"
+item_re = re.compile(r"^ +(\d+)\) (.*), (\S+) miles? (?:heading (\S+)|looping back here)\n"
                      r"\s+to intersection #(\d+) at latitude (\S+), longitude (\S+),\n"
                      r"\s+(.*), where (\d+) road segments? (?:meet|ends)$", re.M)
 
@@ -222,9 +235,9 @@ def check_block(text):
     if float(h.group(2)) != v["lat"] or float(h.group(3)) != v["lon"] or h.group(4) != nearest(n):
         fail("intersection #%d details wrong" % (n + base))
     items = list(item_re.finditer(text[h.start():]))
-    shown = sorted((it.group(2), float(it.group(3)), it.group(4), int(it.group(5)) - base)
+    shown = sorted((it.group(2), float(it.group(3)), it.group(4) or "LOOP", int(it.group(5)) - base)
                    for it in items)
-    truth = sorted((title(nm, ty), L, direction(n, w), w) for w, nm, ty, L in adj[n])
+    truth = sorted((title(nm, ty), L, "LOOP" if w == n else direction(n, w), w) for w, nm, ty, L in adj[n])
     if shown != truth:
         fail("roads at #%d:\n  shown %s\n  truth %s" % (n + base, shown, truth))
     for it in items:
@@ -261,6 +274,8 @@ print("checked %d exploration moves" % visited)
 
 # ------------------------------------------------- choosing places by name
 def choose(inputs, expect_code):
+    if not inputs:
+        return
     prog.send("1"); prog.until(PLACE)
     out = ""
     for s in inputs:
@@ -269,6 +284,8 @@ def choose(inputs, expect_code):
     if not out.endswith(EXPLORE):
         fail("choosing with %r did not reach a place" % (inputs,))
         prog.send(""); prog.send(""); prog.until(MENU); return
+    if expect_code is None:          # only check that some place was reached
+        prog.send("q"); prog.until(MENU); return
     q = [p for p in places if p["code"] == expect_code][0]
     if "\n%s, %s\n   numeric code %s," % (q["name"], q["state"], expect_code) not in out:
         fail("choosing with %r gave the wrong place:\n%s" % (inputs, out[:300]))
@@ -283,6 +300,13 @@ choose(["Twin City", "fl", "1"], [p for p in places if p["name"] == "Twin City"]
 choose(["Twin", "1"], [p for p in places if p["name"] == "Twin City"][0]["code"])  # prefix
 choose(["Island"], "15000001")                                    # unique prefix
 choose(["nonexistent place", "Lonely Place"], "12099997")
+choose(["Town00 FL", "3"], places[unique[2]]["code"])                  # prefix and state, no comma
+choose(["Town01, FL", "fl", "4"], places[unique[13]]["code"])          # prefix, state again, number
+longest = [p for p in places if p["name"].startswith("Llanfair")]
+if longest:                      # a name that fills its whole column
+    same = [p for p in longest if p["state"] == longest[0]["state"]]
+    choose(["%s, %s" % (longest[0]["name"], longest[0]["state"])] + (["1"] if len(same) > 1 else []),
+           same[0]["code"])
 for name in ("Springfield", "Palm Bay Heights", "St. Petersburg"):
     group = [p for p in places if p["name"] == name]
     if not group:
@@ -295,9 +319,26 @@ for name in ("Springfield", "Palm Bay Heights", "St. Petersburg"):
 print("checked choosing places by name")
 
 # invalid input in the menus must not break anything
-prog.send("7"); prog.until(MENU)
+prog.send("7"); txt = prog.until(MENU)
+if ("Please type 1 or q." if args.assignment3 else "Please type 1, 2 or q.") not in txt:
+    fail("menu does not reject a bad choice properly")
+if args.assignment3:
+    prog.send("2"); txt = prog.until(MENU)
+    if "Please type 1 or q." not in txt:
+        fail("assignment 3 program should not offer option 2")
+prog.send("1"); prog.until(PLACE); prog.send("q"); prog.until(MENU)     # q at a place prompt goes back
+prog.send("1"); prog.until(PLACE); prog.send("Twin City"); prog.until(PICK)
+prog.send("4294967297"); txt = prog.until(PICK)
+if "There is no number" not in txt:
+    fail("place list accepted 4294967297")
+prog.send("q"); prog.until(PLACE)
+prog.send(""); prog.until(MENU)
 prog.send("1"); prog.until(PLACE); prog.send(t0["name"] + ", " + t0["state"]); prog.until(EXPLORE)
 prog.send("999"); prog.until(EXPLORE); prog.send("abc"); prog.until(EXPLORE)
+for huge in ("4294967297", "-4294967295", "99999999999999999999", "0", "-1", "+1x"):
+    prog.send(huge); txt = prog.until(EXPLORE)
+    if "is not one of the choices" not in txt:
+        fail("explore accepted %r" % huge)
 prog.send("p"); prog.until(PLACE); prog.send(""); prog.until(EXPLORE)
 prog.send("q"); prog.until(MENU)
 prog.send("1"); prog.until(PLACE); prog.send("Lonely Place"); txt = prog.until(EXPLORE)
