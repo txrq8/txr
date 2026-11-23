@@ -261,7 +261,9 @@ string piece(const string & line, size_t from, size_t to)
 // of those lines) always ends in the same place is right justified, and
 // its column begins where the field before it ends, if that is fixed.  A
 // field that always starts in the same place is left justified, and its
-// column begins there.  Otherwise a column begins just after the longest
+// column begins there.  A field that nearly always both starts and ends
+// in the same place could be either, so if it is a number it is taken to
+// be like the other numbers in the file.  Otherwise a column begins just after the longest
 // field before it, as long as that does not run into this one.  The file
 // is accepted as having fixed columns only if hardly any of those lines
 // contradict the positions.
@@ -347,12 +349,24 @@ class Columns
         { starts[i][spans[k][2 * i]] += 1;
           ends[i][spans[k][2 * i + 1]] += 1; }
       vector<size_t> start(fields), end(fields);
+      vector<int> sameStart(fields), sameEnd(fields);
       vector<bool> right(fields);       // right justified
+      int rightNumbers = 0, leftNumbers = 0;
+      vector<bool> clearly(fields);     // exactly one of start and end is nearly always the same
       for (int i = 0; i < fields; i += 1)
-      { int cs, ce;
-        start[i] = usual(starts[i], lines, cs);
-        end[i] = usual(ends[i], lines, ce);
-        right[i] = ce > cs || (ce == cs && numeric[i]); }
+      { start[i] = usual(starts[i], lines, sameStart[i]);
+        end[i] = usual(ends[i], lines, sameEnd[i]);
+        bool startFixed = sameStart[i] * 4 >= lines * 3, endFixed = sameEnd[i] * 4 >= lines * 3;
+        clearly[i] = startFixed != endFixed;
+        right[i] = endFixed;
+        if (numeric[i] && clearly[i])
+        { if (endFixed)
+            rightNumbers += 1;
+          else
+            leftNumbers += 1; } }
+      for (int i = 0; i < fields; i += 1)
+        if (! clearly[i])
+          right[i] = numeric[i] && rightNumbers >= leftNumbers;
       if (! right[0])
         cut[0] = start[0];
       for (int i = 1; i < fields; i += 1)
