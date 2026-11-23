@@ -138,7 +138,7 @@ if not m or (int(m.group(1)), int(m.group(2)), int(m.group(3))) != (len(places),
     fail("load summary wrong: " + head)
 if ("numbered from %d." % base) not in head:
     fail("numbering base not detected: " + head)
-mc = re.search(r"Checks: (\S+)% of road segment lengths agree.*\n\s+(\S+)% of named places are as close", head)
+mc = re.search(r"Checks: (\S+)% of road segment lengths agree.*\n\s+(\S+)% of named places are near", head)
 if not mc or float(mc.group(1)) < 99.0 or float(mc.group(2)) < 99.0:
     fail("self checks too low: " + head)
 if "Warning" in head or "could not" in head:

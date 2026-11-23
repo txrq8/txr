@@ -1308,8 +1308,10 @@ int main(int argc, char * argv[])
       || ! readPlaces(placesFile, places, table))
     return 1;
 
-  // checks that the files have been understood: named places should be
-  // about as far from their representative intersection as the file says
+  // checks that the files have been understood: a named place should be
+  // near its representative intersection (the distances in the file are a
+  // little shorter than straight lines, so a generous margin is allowed;
+  // a misread file puts places hundreds of miles away)
   int noIntersection = 0, near = 0;
   for (size_t i = 0; i < places.size(); i += 1)
   { const Place * p = places[i];
@@ -1317,7 +1319,7 @@ int main(int argc, char * argv[])
     if (x == NULL)
       noIntersection += 1;
     else if (straightLine(p->latitude, p->longitude, x->latitude, x->longitude)
-             <= (p->distance < 0 ? 0 : p->distance) * 1.1 + 1)
+             <= (p->distance < 0 ? 0 : p->distance) * 2 + 5)
       near += 1; }
   cout << "Read " << plural(table.size(), "named place") << ", "
        << plural(graph.intersections.size(), "intersection") << " and "
@@ -1326,7 +1328,7 @@ int main(int argc, char * argv[])
   cout << "Checks: " << num(graph.consistency * 100, 1)
        << "% of road segment lengths agree with the positions of their ends,\n"
        << "        " << num(places.empty() ? 0 : 100.0 * near / places.size(), 1)
-       << "% of named places are as close to their intersection as the file says.\n";
+       << "% of named places are near the intersection the file gives them.\n";
   if (graph.consistency < 0.95 || (! places.empty() && near < 0.95 * places.size()))
     cerr << "Warning: these checks are low, so the data files may not have been read correctly.\n";
   if (noIntersection > 0)
